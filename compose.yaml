@@ -6,29 +6,12 @@ x-api: &api
     DIRECTUS_URL: http://directus:8055
     DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:?Completa .env}
 services:
-  postgres:
-    image: docker.io/library/postgres:17.6-alpine
-    environment:
-      POSTGRES_DB: demo
-      POSTGRES_USER: demo
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Completa .env}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
   directus:
     image: docker.io/directus/directus:11.14.1
     environment:
       SECRET: ${DIRECTUS_SECRET:?Completa .env}
-      DB_CLIENT: pg
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: demo
-      DB_USER: demo
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Completa .env}
+      DB_CLIENT: sqlite3
+      DB_FILENAME: /directus/database/data.db
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Completa .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Completa .env}
       ADMIN_TOKEN: ${DIRECTUS_TOKEN:?Completa .env}
@@ -36,9 +19,8 @@ services:
       TELEMETRY: "false"
     ports:
       - "127.0.0.1:${DIRECTUS_PORT:-8055}:8055"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    volumes:
+      - directus_data:/directus/database
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8055/server/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 5s
@@ -65,4 +47,4 @@ services:
       timeout: 5s
       retries: 20
 volumes:
-  postgres_data:
+  directus_data:

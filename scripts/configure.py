@@ -5,7 +5,6 @@ import secrets
 
 target = Path(__file__).resolve().parents[1] / ".env"
 values = {
-    "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
     "DIRECTUS_SECRET": secrets.token_urlsafe(48),
     "ADMIN_EMAIL": "admin@example.com",
     "ADMIN_PASSWORD": secrets.token_urlsafe(32),
