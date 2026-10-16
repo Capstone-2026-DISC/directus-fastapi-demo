@@ -1,0 +1,68 @@
+name: directus-fastapi-demo
+x-api: &api
+  image: directus-fastapi-demo:local
+  build: .
+  environment: &api-env
+    DIRECTUS_URL: http://directus:8055
+    DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:?Completa .env}
+services:
+  postgres:
+    image: docker.io/library/postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Completa .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  directus:
+    image: docker.io/directus/directus:11.14.1
+    environment:
+      SECRET: ${DIRECTUS_SECRET:?Completa .env}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: demo
+      DB_USER: demo
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Completa .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Completa .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Completa .env}
+      ADMIN_TOKEN: ${DIRECTUS_TOKEN:?Completa .env}
+      WEBSOCKETS_ENABLED: "false"
+      TELEMETRY: "false"
+    ports:
+      - "127.0.0.1:${DIRECTUS_PORT:-8055}:8055"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8055/server/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 30
+  init:
+    <<: *api
+    command: ["python", "-m", "app.bootstrap"]
+    depends_on:
+      directus:
+        condition: service_healthy
+    restart: "no"
+  fastapi:
+    <<: *api
+    ports:
+      - "127.0.0.1:${FASTAPI_PORT:-8000}:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  postgres_data:
