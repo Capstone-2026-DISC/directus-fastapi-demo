@@ -4,12 +4,12 @@
 
 # Directus + FastAPI
 
-CRUD de tareas que muestra cómo una API en FastAPI puede apoyarse en Directus para guardar datos en PostgreSQL
+CRUD de tareas que muestra cómo una API en FastAPI puede apoyarse en Directus para guardar datos en SQLite
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Directus](https://img.shields.io/badge/Directus-11-6644FF?style=for-the-badge&logo=directus&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?style=for-the-badge&logo=postgresql&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![CI](https://img.shields.io/github/actions/workflow/status/Capstone-2026-DISC/directus-fastapi-demo/ci.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)
 
@@ -17,7 +17,7 @@ CRUD de tareas que muestra cómo una API en FastAPI puede apoyarse en Directus p
 
 ## Arquitectura
 
-FastAPI valida las peticiones y las traduce a llamadas HTTP contra Directus. Directus aplica sus reglas y accede a la base de datos mediante Knex, su constructor de consultas SQL, con el controlador `pg` de PostgreSQL. Nada fuera de Directus toca la base.
+FastAPI valida las peticiones y las traduce a llamadas HTTP contra Directus. Directus aplica sus reglas y accede a SQLite mediante Knex.js, su constructor de consultas SQL, con el controlador `sqlite3`. Los datos se guardan en el archivo `data.db` del volumen `directus_data`. En el flujo del CRUD, solo Directus accede al archivo.
 
 ```mermaid
 flowchart LR
@@ -34,8 +34,11 @@ flowchart LR
             rest["API REST /items"]
             servicios["Servicios y permisos"]
             knex["Knex.js"]
+            sqlite["Controlador sqlite3"]
         end
-        pg[("postgres")]
+        subgraph volumen ["Volumen directus_data"]
+            db[("SQLite: data.db")]
+        end
         init["init (crea la colección)"]
     end
 
@@ -44,7 +47,8 @@ flowchart LR
     rutas --> http
     http -->|"Bearer token"| rest
     rest --> servicios --> knex
-    knex -->|"SQL vía pg"| pg
+    knex --> sqlite
+    sqlite -->|"SQL / acceso al archivo"| db
     init -.->|"una sola vez"| rest
 ```
 
@@ -59,15 +63,18 @@ sequenceDiagram
     participant F as FastAPI
     participant D as Directus
     participant K as Knex.js
-    participant P as PostgreSQL
+    participant S as sqlite3
+    participant B as data.db (volumen directus_data)
 
     C->>F: POST /tasks con title
     F->>F: Valida con Pydantic
     F->>D: POST /items/tasks con Bearer token
     D->>D: Revisa permisos y reglas
     D->>K: Crea la consulta
-    K->>P: INSERT INTO tasks
-    P-->>K: Fila creada
+    K->>S: Ejecuta la consulta SQL
+    S->>B: INSERT INTO tasks
+    B-->>S: Fila creada
+    S-->>K: Registro
     K-->>D: Registro
     D-->>F: 200 con data
     F-->>C: 201 con la tarea
@@ -94,6 +101,7 @@ classDiagram
         title string
         completed boolean
     }
+    note for tasks "Tabla en data.db (volumen directus_data)"
     TaskCreate <|-- Task
     Task ..> tasks : se guarda en
     TaskUpdate ..> tasks : PATCH parcial
@@ -103,12 +111,24 @@ classDiagram
 
 | Servicio | Imagen | Rol | Puerto |
 | --- | --- | --- | --- |
-| `postgres` | PostgreSQL 17 | Almacena los datos | interno |
-| `directus` | Directus 11 | API de datos y panel | 8055 |
+| `directus` | Directus 11 | API de datos, panel y acceso al archivo SQLite | 8055 |
 | `init` | Imagen propia | Crea la colección `tasks` y termina | ninguno |
 | `fastapi` | Imagen propia | Expone el CRUD | 8000 |
 
-El orden de arranque es `postgres`, `directus`, `init` y `fastapi`, cada uno cuando el anterior está saludable.
+El orden de arranque es `directus`, `init` y `fastapi`. Cuando Directus está saludable, `init` crea la colección; al terminar correctamente, arranca FastAPI. SQLite no necesita un servicio aparte.
+
+## Entender el backend
+
+FastAPI valida los datos con Pydantic y usa `httpx` para llamar a Directus; no ejecuta SQL. Directus gestiona la colección `tasks`, sus permisos y las consultas que Knex.js ejecuta mediante `sqlite3`. El archivo `/directus/database/data.db` contiene tanto las tareas como las tablas internas de Directus.
+
+Con los servicios levantados y la herramienta `sqlite3` instalada, puedes copiar la base e inspeccionar su esquema:
+
+```bash
+docker compose cp directus:/directus/database/data.db ./data.db
+sqlite3 data.db .schema
+```
+
+La tabla `tasks` tiene las columnas `id`, `title` y `completed`. La copia permite leer el esquema localmente; modificarla no cambia la base que usa Directus. `data.db` y sus archivos auxiliares quedan excluidos de Git y del contexto Docker.
 
 ## Uso
 
@@ -161,7 +181,7 @@ En cada push a `main` la imagen se publica en `ghcr.io/capstone-2026-disc/direct
 
 ## Notas
 
-Es una demo local. FastAPI no pide autenticación y usa el token del administrador de Directus, y ambos puertos escuchan solo en localhost. Para un despliegue compartido conviene agregar autenticación y un usuario de servicio con permisos limitados a `tasks`. El volumen conserva los datos de PostgreSQL, y `docker compose down -v` los elimina.
+Es una demo local. FastAPI no pide autenticación y usa el token del administrador de Directus, y ambos puertos escuchan solo en localhost. Para un despliegue compartido conviene agregar autenticación y un usuario de servicio con permisos limitados a `tasks`. El volumen `directus_data` conserva el archivo SQLite `data.db` al reiniciar los servicios, y `docker compose down -v` elimina ese volumen y sus datos.
 
 ## Referencias
 
